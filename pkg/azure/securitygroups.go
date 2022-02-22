@@ -19,10 +19,11 @@ package azure
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-11-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-03-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
@@ -40,7 +41,7 @@ type CloudInfo struct {
 }
 
 func (c *CloudInfo) openInternalPorts(infraID string, ports []api.PortSpec,
-	networkClient *network.SecurityGroupsClient, subnetClient *network.SubnetsClient) error {
+	networkClient *network.SecurityGroupsClient, subnetClient *network.SubnetsClient, reporter api.Reporter) error {
 	groupName := infraID + internalSecurityGroupSuffix
 
 	isFound := checkIfSecurityGroupPresent(groupName, networkClient, c.BaseGroupName)
@@ -48,9 +49,10 @@ func (c *CloudInfo) openInternalPorts(infraID string, ports []api.PortSpec,
 		return nil
 	}
 
-	var securityRules []network.SecurityRule
-	for _, port := range ports {
-		securityRules = append(securityRules, c.createSecurityRule("", port.Port, port.Protocol))
+	securityRules := []network.SecurityRule{}
+	for i, port := range ports {
+		securityRules = append(securityRules, c.createSecurityRule(allNetworkCIDR, allNetworkCIDR, port.Protocol,
+			port.Port, int32(basePriority+i)))
 	}
 
 	vnetName := infraID + "-vnet"
@@ -66,14 +68,18 @@ func (c *CloudInfo) openInternalPorts(infraID string, ports []api.PortSpec,
 	if err != nil {
 		return errors.Wrapf(err, "failed to retrieve subnet %q", infraID+"-master-subnet")
 	}
+
+	reporter.Started(fmt.Sprintf("The subnets are masterSubnet = %v , workerSubnet = %v", workerSubnet, masterSubnet))
 	subnets := []network.Subnet{*workerSubnet, *masterSubnet}
 	nwSecurityGroup := network.SecurityGroup{
-		Name: &groupName,
+		Name:     &groupName,
+		Location: to.StringPtr(c.Region),
 		SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
 			SecurityRules: &securityRules,
 			Subnets:       &subnets,
 		},
 	}
+	reporter.Succeeded(fmt.Sprintf("The subnets %v", nwSecurityGroup.Subnets))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
@@ -83,13 +89,14 @@ func (c *CloudInfo) openInternalPorts(infraID string, ports []api.PortSpec,
 		return errors.Wrapf(err, "creating security group %q failed", groupName)
 	}
 
-	_, err = future.Result(*networkClient)
+	err = future.WaitForCompletionRef(ctx, networkClient.Client)
 
 	return errors.Wrapf(err, "Error creating  security group %v ", groupName)
 }
 
 func (c *CloudInfo) removeInternalFirewallRules(infraID string, sgClient *network.SecurityGroupsClient) error {
 	groupName := infraID + internalSecurityGroupSuffix
+
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
@@ -101,23 +108,23 @@ func (c *CloudInfo) removeInternalFirewallRules(infraID string, sgClient *networ
 	nwSecurityGroup.SecurityGroupPropertiesFormat.Subnets = nil
 
 	updateFuture, err := sgClient.CreateOrUpdate(ctx, c.BaseGroupName, groupName, nwSecurityGroup)
+
 	if err != nil {
 		return errors.Wrapf(err, "removing security group %q from subnets failed", groupName)
 	}
 
-	_, err = updateFuture.Result(*sgClient)
+	err = updateFuture.WaitForCompletionRef(ctx, sgClient.Client)
 
 	if err != nil {
 		return errors.Wrapf(err, "waiting for security group  %q to be updated failed", groupName)
 	}
 
 	deleteFuture, err := sgClient.Delete(ctx, c.BaseGroupName, groupName)
-
 	if err != nil {
 		return errors.Wrapf(err, "deleting security group %q failed", groupName)
 	}
 
-	_, err = deleteFuture.Result(*sgClient)
+	err = deleteFuture.WaitForCompletionRef(ctx, sgClient.Client)
 
 	if err != nil {
 		return errors.Wrapf(err, "waiting for security group  %q to be deleted failed", groupName)
@@ -147,17 +154,19 @@ func getSubnet(virtualNetworkName, subnetName, baseGroupName string, subnetsClie
 	return &subnet, nil
 }
 
-func (c *CloudInfo) createSecurityRule(remoteIPPrefix string, port uint16,
-	protocol string) network.SecurityRule {
+func (c *CloudInfo) createSecurityRule(srcIPPrefix, destIPPrefix, protocol string, port uint16, priority int32,
+) network.SecurityRule {
 	return network.SecurityRule{
-		Name: to.StringPtr("allow_ssh"),
+		Name: to.StringPtr(internalSecurityRulePrefix + protocol + "-" + strconv.Itoa(int(port))),
 		SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-			Protocol:            network.SecurityRuleProtocol(protocol),
-			SourcePortRange:     to.StringPtr(strconv.Itoa(int(port)) + "-" + strconv.Itoa(int(port))),
-			SourceAddressPrefix: &remoteIPPrefix,
-			Access:              network.SecurityRuleAccessAllow,
-			Direction:           network.SecurityRuleDirectionInbound,
-			Priority:            to.Int32Ptr(100),
+			Protocol:                 network.SecurityRuleProtocol(protocol),
+			DestinationPortRange:     to.StringPtr(strconv.Itoa(int(port)) + "-" + strconv.Itoa(int(port))),
+			SourceAddressPrefix:      &srcIPPrefix,
+			DestinationAddressPrefix: &destIPPrefix,
+			SourcePortRange:          to.StringPtr("*"),
+			Access:                   network.SecurityRuleAccessAllow,
+			Direction:                network.SecurityRuleDirectionInbound,
+			Priority:                 to.Int32Ptr(priority),
 		},
 	}
 }

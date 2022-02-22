@@ -21,13 +21,18 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-11-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-03-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/submariner-io/cloud-prepare/pkg/api"
 )
 
 const (
 	internalSecurityGroupSuffix = "-submariner-internal-sg"
+	internalSecurityRulePrefix  = "Submariner-Internal-"
+	inboundRulePrefix           = "Submariner-Inbound-"
+	forntendIPConfigurationName = "public-lb-ip-v4"
+	allNetworkCIDR              = "0.0.0.0/0"
+	basePriority                = 100
 )
 
 type azureCloud struct {
@@ -35,19 +40,25 @@ type azureCloud struct {
 }
 
 // NewCloud creates a new api.Cloud instance which can prepare RHOS for Submariner to be deployed on it.
-func NewCloud(info CloudInfo) api.Cloud {
+func NewCloud(info *CloudInfo) api.Cloud {
 	return &azureCloud{
-		CloudInfo: info,
+		CloudInfo: *info,
 	}
 }
 
 func (az *azureCloud) PrepareForSubmariner(input api.PrepareForSubmarinerInput, reporter api.Reporter) error {
 	reporter.Started("Opening internal ports for intra-cluster communications on RHOS")
 
-	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, &az.CloudInfo.Authorizer)
-	subnetClient := getSubnetClient(az.CloudInfo.SubscriptionID, &az.CloudInfo.Authorizer)
+	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
+	subnetClient := getSubnetClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
+	lbClient := getLBClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 
-	if err := az.openInternalPorts(az.InfraID, input.InternalPorts, nsgClient, subnetClient); err != nil {
+	if err := az.openInternalPorts(az.InfraID, input.InternalPorts, nsgClient, subnetClient, reporter); err != nil {
+		reporter.Failed(err)
+		return err
+	}
+
+	if err := az.createSubmarinerLoadBalancingRules(az.InfraID, forntendIPConfigurationName, input.InternalPorts, lbClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
@@ -61,9 +72,15 @@ func (az *azureCloud) PrepareForSubmariner(input api.PrepareForSubmarinerInput, 
 func (az *azureCloud) CleanupAfterSubmariner(reporter api.Reporter) error {
 	reporter.Started("Revoking intra-cluster communication permissions")
 
-	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, &az.CloudInfo.Authorizer)
+	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
+	lbClient := getLBClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 
 	if err := az.removeInternalFirewallRules(az.InfraID, nsgClient); err != nil {
+		reporter.Failed(err)
+		return err
+	}
+
+	if err := az.deleteSubmarinerLoadBalancingRules(az.InfraID, lbClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
@@ -73,16 +90,25 @@ func (az *azureCloud) CleanupAfterSubmariner(reporter api.Reporter) error {
 	return nil
 }
 
-func getNsgClient(subscriptionID string, authorizer *autorest.Authorizer) *network.SecurityGroupsClient {
+func getNsgClient(subscriptionID string, authorizer autorest.Authorizer) *network.SecurityGroupsClient {
 	nsgClient := network.NewSecurityGroupsClient(subscriptionID)
-	nsgClient.Authorizer = *authorizer
+	nsgClient.Authorizer = authorizer
+
 	return &nsgClient
 }
 
-func getSubnetClient(subscriptionID string, authorizer *autorest.Authorizer) *network.SubnetsClient {
+func getSubnetClient(subscriptionID string, authorizer autorest.Authorizer) *network.SubnetsClient {
 	subnetClient := network.NewSubnetsClient(subscriptionID)
-	subnetClient.Authorizer = *authorizer
+	subnetClient.Authorizer = authorizer
+
 	return &subnetClient
+}
+
+func getLBClient(subscriptionID string, authorizer autorest.Authorizer) *network.LoadBalancersClient {
+	lbClient := network.NewLoadBalancersClient(subscriptionID)
+	lbClient.Authorizer = authorizer
+
+	return &lbClient
 }
 
 func formatPorts(ports []api.PortSpec) string {
@@ -90,5 +116,6 @@ func formatPorts(ports []api.PortSpec) string {
 	for _, port := range ports {
 		portStrs = append(portStrs, fmt.Sprintf("%d/%s", port.Port, port.Protocol))
 	}
+
 	return strings.Join(portStrs, ", ")
 }
