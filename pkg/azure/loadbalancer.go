@@ -37,6 +37,11 @@ func (c *CloudInfo) createSubmarinerLoadBalancingRules(infraID, forntendIPConfig
 		return errors.Wrapf(err, "getting the loadblancer %q failed", infraID)
 	}
 
+	isFound := checkIfInboundNatRulesPresent(&loadBalancer)
+	if isFound {
+		return nil
+	}
+
 	idPrefix := fmt.Sprintf("subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/loadBalancers",
 		c.SubscriptionID, c.BaseGroupName)
 	frontEndIPConfigurationID := to.StringPtr(fmt.Sprintf("/%s/%s/frontendIPConfigurations/%s", idPrefix,
@@ -116,4 +121,14 @@ func (c *CloudInfo) createInboundNatRule(port uint16, protocol string, frontendI
 		},
 		Name: to.StringPtr(inboundRulePrefix + protocol + "-" + strconv.Itoa(int(port))),
 	}
+}
+
+func checkIfInboundNatRulesPresent(loadBalancer *network.LoadBalancer) bool {
+	for _, existingInboundNatRule := range *loadBalancer.InboundNatRules {
+		if existingInboundNatRule.Name != nil && strings.Contains(*existingInboundNatRule.Name, inboundRulePrefix) {
+			return true
+		}
+	}
+
+	return false
 }
