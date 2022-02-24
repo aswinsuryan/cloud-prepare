@@ -27,7 +27,8 @@ import (
 )
 
 const (
-	internalSecurityGroupSuffix = "-submariner-internal-sg"
+	internalSecurityGroupSuffix = "-nsg"
+	externalSecurityGroupSuffix = "-submariner-external-sg"
 	internalSecurityRulePrefix  = "Submariner-Internal-"
 	inboundRulePrefix           = "Submariner-Inbound-"
 	forntendIPConfigurationName = "public-lb-ip-v4"
@@ -50,15 +51,21 @@ func (az *azureCloud) PrepareForSubmariner(input api.PrepareForSubmarinerInput, 
 	reporter.Started("Opening internal ports for intra-cluster communications on RHOS")
 
 	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
-	subnetClient := getSubnetClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 	lbClient := getLBClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 
-	if err := az.openInternalPorts(az.InfraID, input.InternalPorts, nsgClient, subnetClient, reporter); err != nil {
+	// TODO Remove this code once gwdeployer is done
+	if errGW := az.openGWPorts(az.InfraID, input.InternalPorts, nsgClient, nil); errGW != nil {
+		reporter.Failed(errGW)
+		return errGW
+	}
+
+	// TODO Remove this code once gwdeployer is done
+	if err := az.createSubmarinerLoadBalancingRules(az.InfraID, forntendIPConfigurationName, input.InternalPorts, lbClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
 
-	if err := az.createSubmarinerLoadBalancingRules(az.InfraID, forntendIPConfigurationName, input.InternalPorts, lbClient); err != nil {
+	if err := az.openInternalPorts(az.InfraID, input.InternalPorts, nsgClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
@@ -75,12 +82,19 @@ func (az *azureCloud) CleanupAfterSubmariner(reporter api.Reporter) error {
 	nsgClient := getNsgClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 	lbClient := getLBClient(az.CloudInfo.SubscriptionID, az.CloudInfo.Authorizer)
 
-	if err := az.removeInternalFirewallRules(az.InfraID, nsgClient); err != nil {
+	// TODO Remove this code once gwdeployer is done
+	if errGW := az.removeGWFirewallRules(az.InfraID, nsgClient); errGW != nil {
+		reporter.Failed(errGW)
+		return errGW
+	}
+
+	// TODO Remove this code once gwdeployer is done
+	if err := az.deleteSubmarinerLoadBalancingRules(az.InfraID, lbClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
 
-	if err := az.deleteSubmarinerLoadBalancingRules(az.InfraID, lbClient); err != nil {
+	if err := az.removeInternalFirewallRules(az.InfraID, nsgClient); err != nil {
 		reporter.Failed(err)
 		return err
 	}
@@ -95,13 +109,6 @@ func getNsgClient(subscriptionID string, authorizer autorest.Authorizer) *networ
 	nsgClient.Authorizer = authorizer
 
 	return &nsgClient
-}
-
-func getSubnetClient(subscriptionID string, authorizer autorest.Authorizer) *network.SubnetsClient {
-	subnetClient := network.NewSubnetsClient(subscriptionID)
-	subnetClient.Authorizer = authorizer
-
-	return &subnetClient
 }
 
 func getLBClient(subscriptionID string, authorizer autorest.Authorizer) *network.LoadBalancersClient {
