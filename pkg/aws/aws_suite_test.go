@@ -111,8 +111,24 @@ func (f *fakeAWSClientBase) expectDescribeVpcs(vpcID string) {
 	}, {
 		Name:   ptr.To(clusterFilterTagName),
 		Values: []string{"owned"},
+	}}}).Matches))).Return(&ec2.DescribeVpcsOutput{Vpcs: vpcs}, nil).Maybe()
+}
+
+func (f *fakeAWSClientBase) expectDescribeVpcsSigs(vpcID string) {
+	var vpcs []types.Vpc
+	if vpcID != "" {
+		vpcs = []types.Vpc{
+			{
+				VpcId: ptr.To(vpcID),
+			},
+		}
+	}
+
+	f.awsClient.EXPECT().DescribeVpcs(mock.Anything, mock.MatchedBy(((&filtersMatcher{expectedFilters: []types.Filter{{
+		Name:   ptr.To("tag:Name"),
+		Values: []string{infraID + "-vpc"},
 	}, {
-		Name:   ptr.To(providerAWSTagPrefix + infraID),
+		Name:   ptr.To(clusterFilterTagNameSigs),
 		Values: []string{"owned"},
 	}}}).Matches))).Return(&ec2.DescribeVpcsOutput{Vpcs: vpcs}, nil).Maybe()
 }
