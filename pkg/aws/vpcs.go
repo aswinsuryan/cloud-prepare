@@ -42,14 +42,20 @@ func (ac *awsCloud) getVpcID() (string, error) {
 	ownedFilters := ac.filterByCurrentCluster()
 	vpcName := ac.withAWSInfo("{infraID}-vpc")
 
-	filters := []types.Filter{
-		ac.filterByName(vpcName),
-	}
-	filters = append(filters, ownedFilters...)
+	for i := range ownedFilters {
+		filters := []types.Filter{
+			ac.filterByName(vpcName),
+			ownedFilters[i],
+		}
 
-	result, err = ac.client.DescribeVpcs(context.TODO(), &ec2.DescribeVpcsInput{Filters: filters})
-	if err != nil {
-		return "", errors.Wrap(err, "error describing AWS VPCs")
+		result, err = ac.client.DescribeVpcs(context.TODO(), &ec2.DescribeVpcsInput{Filters: filters})
+		if err != nil {
+			return "", errors.Wrap(err, "error describing AWS VPCs")
+		}
+
+		if len(result.Vpcs) != 0 {
+			break
+		}
 	}
 
 	if len(result.Vpcs) == 0 {
