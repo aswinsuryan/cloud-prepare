@@ -115,8 +115,24 @@ func (f *fakeAWSClientBase) expectDescribeVpcs(vpcID string) {
 	}, types.Filter{
 		Name:   awssdk.String(clusterFilterTagName),
 		Values: []string{"owned"},
+	})).Return(&ec2.DescribeVpcsOutput{Vpcs: vpcs}, nil).AnyTimes()
+}
+
+func (f *fakeAWSClientBase) expectDescribeVpcsSigs(vpcID string) {
+	var vpcs []types.Vpc
+	if vpcID != "" {
+		vpcs = []types.Vpc{
+			{
+				VpcId: ptr.To(vpcID),
+			},
+		}
+	}
+
+	f.awsClient.EXPECT().DescribeVpcs(gomock.Any(), eqFilters(types.Filter{
+		Name:   ptr.To("tag:Name"),
+		Values: []string{infraID + "-vpc"},
 	}, types.Filter{
-		Name:   ptr.To(providerAWSTagPrefix + infraID),
+		Name:   ptr.To(clusterFilterTagNameSigs),
 		Values: []string{"owned"},
 	})).Return(&ec2.DescribeVpcsOutput{Vpcs: vpcs}, nil).AnyTimes()
 }
