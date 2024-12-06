@@ -25,11 +25,24 @@ import (
 	"google.golang.org/api/compute/v1"
 )
 
+type CloudOption func(*CloudInfo)
+
+const (
+	VPCName = "VPCName"
+)
+
 type CloudInfo struct {
-	InfraID   string
-	Region    string
-	ProjectID string
-	Client    gcpclient.Interface
+	InfraID     string
+	Region      string
+	ProjectID   string
+	cloudConfig map[string]interface{}
+	Client      gcpclient.Interface
+}
+
+func WithVPCName(name string) CloudOption {
+	return func(cloud *CloudInfo) {
+		cloud.cloudConfig[VPCName] = name
+	}
 }
 
 // Open expected ports by creating related firewall rule.

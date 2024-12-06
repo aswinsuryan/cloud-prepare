@@ -31,7 +31,14 @@ type gcpCloud struct {
 }
 
 // NewCloud creates a new api.Cloud instance which can prepare GCP for Submariner to be deployed on it.
-func NewCloud(info CloudInfo) api.Cloud {
+func NewCloud(info CloudInfo, opts ...CloudOption) api.Cloud {
+	info.cloudConfig = make(map[string]interface{})
+	for _, opt := range opts {
+		opt(&info)
+	}
+	if _, ok := info.cloudConfig[VPCName]; !ok {
+		info.cloudConfig[VPCName] = info.InfraID + "-network"
+	}
 	return &gcpCloud{CloudInfo: info}
 }
 
@@ -40,7 +47,9 @@ func (gc *gcpCloud) OpenPorts(ports []api.PortSpec, status reporter.Interface) e
 	status.Start("Opening internal ports %q for intra-cluster communications on GCP", formatPorts(ports))
 	defer status.End()
 
-	internalIngress := newInternalFirewallRule(gc.ProjectID, gc.InfraID, ports)
+	vpcName, _ := gc.cloudConfig[VPCName]
+
+	internalIngress := newInternalFirewallRule(gc.ProjectID, gc.InfraID, vpcName.(string), ports)
 	if err := gc.openPorts(internalIngress); err != nil {
 		return status.Error(err, "unable to open ports")
 	}
