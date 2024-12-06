@@ -29,7 +29,7 @@ import (
 const (
 	ingressDirection         = "INGRESS"
 	publicPortsRuleName      = "submariner-public-ports"
-	internalPortsRuleName    = "submariner-internal-ports"
+	internalPortsRuleName    = "submariner-internal-p`orts"
 	submarinerGatewayNodeTag = "submariner-io-gateway-node"
 )
 

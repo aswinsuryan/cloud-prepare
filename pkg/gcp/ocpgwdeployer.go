@@ -62,6 +62,8 @@ func (d *ocpGatewayDeployer) Deploy(input api.GatewayDeployInput, status reporte
 
 	vpcName, _ := d.cloudConfig[VPCName]
 
+	status.Start("VPC Name is %v", vpcName)
+
 	externalIngress := newExternalFirewallRules(d.ProjectID, d.InfraID, vpcName.(string), input.PublicPorts)
 	if err := d.openPorts(externalIngress); err != nil {
 		return status.Error(err, "error creating firewall rule %q", externalIngress.Name)
