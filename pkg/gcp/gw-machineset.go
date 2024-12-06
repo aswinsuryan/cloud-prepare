@@ -64,8 +64,8 @@ spec:
           machineType: {{.InstanceType}}
           metadata:
           networkInterfaces:
-          - network: {{.InfraID}}-network
-            subnetwork: {{.InfraID}}-worker-subnet
+          - network: {{.VpcNetworkName}}
+            subnetwork: {{.PublicSubnetName}}
             publicIP: true
           projectID: {{.ProjectID}}
           region: {{.Region}}

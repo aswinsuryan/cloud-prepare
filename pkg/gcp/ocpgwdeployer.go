@@ -44,9 +44,19 @@ type ocpGatewayDeployer struct {
 }
 
 // NewOcpGatewayDeployer returns a GatewayDeployer capable of deploying gateways using OCP.
-func NewOcpGatewayDeployer(info CloudInfo, msDeployer ocp.MachineSetDeployer, instanceType, image string,
+
+func NewOcpGatewayDeployer(info CloudInfo, //nolint: gocritic // Ignore 'hugeParam' - pass by value for CloudInfo is intentional.
+	msDeployer ocp.MachineSetDeployer, instanceType, image string,
 	k8sClient k8s.Interface,
 ) api.GatewayDeployer {
+	if info.VpcName == "" {
+		info.VpcName = info.InfraID + "-network"
+	}
+
+	if info.PublicSubnetName == "" {
+		info.PublicSubnetName = info.InfraID + "-worker-subnet"
+	}
+
 	return &ocpGatewayDeployer{
 		CloudInfo:    info,
 		msDeployer:   msDeployer,
@@ -60,7 +70,7 @@ func (d *ocpGatewayDeployer) Deploy(input api.GatewayDeployInput, status reporte
 	status.Start("Configuring the required firewall rules for inter-cluster traffic")
 	defer status.End()
 
-	externalIngress := newExternalFirewallRules(d.ProjectID, d.InfraID, input.PublicPorts)
+	externalIngress := newExternalFirewallRules(d.ProjectID, d.InfraID, d.VpcName, input.PublicPorts)
 	if err := d.openPorts(externalIngress); err != nil {
 		return status.Error(err, "error creating firewall rule %q", externalIngress.Name)
 	}
@@ -166,6 +176,8 @@ type machineSetConfig struct {
 	Region              string
 	Image               string
 	SubmarinerGWNodeTag string
+	VpcNetworkName      string
+	PublicSubnetName    string
 }
 
 func (d *ocpGatewayDeployer) loadGatewayYAML(zone, image string) ([]byte, error) {
@@ -184,6 +196,8 @@ func (d *ocpGatewayDeployer) loadGatewayYAML(zone, image string) ([]byte, error)
 		Region:              d.Region,
 		Image:               image,
 		SubmarinerGWNodeTag: submarinerGatewayNodeTag,
+		VpcNetworkName:      d.VpcName,
+		PublicSubnetName:    d.PublicSubnetName,
 	}
 
 	err = tpl.Execute(&buf, tplVars)

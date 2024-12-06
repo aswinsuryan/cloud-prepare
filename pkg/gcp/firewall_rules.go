@@ -33,13 +33,13 @@ const (
 	submarinerGatewayNodeTag = "submariner-io-gateway-node"
 )
 
-func newExternalFirewallRules(projectID, infraID string, ports []api.PortSpec) *compute.Firewall {
+func newExternalFirewallRules(projectID, infraID, network string, ports []api.PortSpec) *compute.Firewall {
 	ingressName := generateRuleName(infraID, publicPortsRuleName)
 
 	// We want the external firewall rules to be applied only to Gateway nodes. So, we use the TargetTags
 	// field and include submarinerGatewayNodeTag for selection of Gateway nodes. All the Submariner Gateway
 	// instances will be tagged with submarinerGatewayNodeTag.
-	ingressRule := newFirewallRule(projectID, infraID, ingressName, ingressDirection, ports)
+	ingressRule := newFirewallRule(projectID, ingressName, ingressDirection, network, ports)
 	ingressRule.TargetTags = []string{
 		submarinerGatewayNodeTag,
 	}
@@ -47,10 +47,10 @@ func newExternalFirewallRules(projectID, infraID string, ports []api.PortSpec) *
 	return ingressRule
 }
 
-func newInternalFirewallRule(projectID, infraID string, ports []api.PortSpec) *compute.Firewall {
+func newInternalFirewallRule(projectID, infraID, network string, ports []api.PortSpec) *compute.Firewall {
 	ingressName := generateRuleName(infraID, internalPortsRuleName)
 
-	rule := newFirewallRule(projectID, infraID, ingressName, ingressDirection, ports)
+	rule := newFirewallRule(projectID, ingressName, ingressDirection, network, ports)
 	rule.TargetTags = []string{
 		infraID + "-worker",
 		infraID + "-master",
@@ -63,7 +63,7 @@ func newInternalFirewallRule(projectID, infraID string, ports []api.PortSpec) *c
 	return rule
 }
 
-func newFirewallRule(projectID, infraID, name, direction string, ports []api.PortSpec) *compute.Firewall {
+func newFirewallRule(projectID, name, direction, network string, ports []api.PortSpec) *compute.Firewall {
 	allowedPorts := []*compute.FirewallAllowed{}
 
 	for _, port := range ports {
@@ -79,7 +79,7 @@ func newFirewallRule(projectID, infraID, name, direction string, ports []api.Por
 
 	return &compute.Firewall{
 		Name:      name,
-		Network:   fmt.Sprintf("projects/%s/global/networks/%s-network", projectID, infraID),
+		Network:   fmt.Sprintf("projects/%s/global/networks/%s", projectID, network),
 		Direction: direction,
 		Allowed:   allowedPorts,
 	}
